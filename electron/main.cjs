@@ -21,8 +21,8 @@ let botProcess = null;
 let store = null;
 let initializingPromise = null; // NOVO: Promise para controlar a inicialização
 
-// Caminho para o executável do Bot (AJUSTAR!)
-const BOT_EXECUTABLE_PATH = 'C:/path/to/your/rust_bot_executable.exe'; // <<< AJUSTE ESTE CAMINHO >>>
+// Caminho para o executável do Bot
+const BOT_EXECUTABLE_PATH = path.join(__dirname, '..', '..', 'GoBot', 'GoBot.exe'); // Relative path
 
 // NOVO: CSS pré-definidos
 const CARD_STYLES_CSS = {
@@ -103,13 +103,13 @@ function startBotProcess() {
         return;
     }
     console.log(`[Main] Iniciando Bot: ${BOT_EXECUTABLE_PATH}`);
-    sendToRenderer('main:bot-status-update', { state: 'initializing' });
+    // REMOVED: sendToRenderer('main:bot-status-update', { state: 'initializing' });
 
     if (!fs.existsSync(BOT_EXECUTABLE_PATH)) {
         const errorMsg = `Executável do Bot não encontrado em: ${BOT_EXECUTABLE_PATH}`;
         console.error(`[Main] ${errorMsg}`);
         sendToRenderer('main:bot-error', { message: errorMsg });
-        sendToRenderer('main:bot-status-update', { state: 'Erro' });
+        // REMOVED: sendToRenderer('main:bot-status-update', { state: 'Erro' });
         return;
     }
 
@@ -127,6 +127,7 @@ function startBotProcess() {
                         case 'status_update': sendToRenderer('main:bot-status-update', message.payload); break;
                         case 'log': sendToRenderer('main:bot-log', message.payload); break;
                         case 'result': sendToRenderer('main:bot-result', message.payload); break;
+                        case 'sequence_progress': sendToRenderer('main:bot-sequence-progress', message.payload); break; // <-- NOVO
                         default:
                             console.warn(`[Bot stdout] Tipo de mensagem desconhecido: ${message.type}`);
                             sendToRenderer('main:bot-log', { level: 'warn', message: `Recebida mensagem desconhecida do bot: ${line}` });
@@ -166,12 +167,12 @@ function startBotProcess() {
         });
 
         console.log('[Main] Processo Bot iniciado com sucesso (PID:', botProcess.pid, ')');
-        sendToRenderer('main:bot-status-update', { state: 'Ocioso' });
+        // REMOVED: sendToRenderer('main:bot-status-update', { state: 'Ocioso' });
 
     } catch (spawnError) {
         console.error('[Main] Erro EXCEPCIONAL ao tentar spawn:', spawnError);
         sendToRenderer('main:bot-error', { message: `Erro crítico no spawn: ${spawnError.message}` });
-        sendToRenderer('main:bot-status-update', { state: 'Erro' });
+        // REMOVED: sendToRenderer('main:bot-status-update', { state: 'Erro' });
         botProcess = null;
     }
 }
@@ -184,7 +185,7 @@ function stopBotProcess() {
             if (botProcess.stdin && !botProcess.stdin.destroyed) {
                 botProcess.stdin.write(JSON.stringify(command) + '\n');
                 console.log('[Main] Comando STOP enviado. Aguardando encerramento do processo...');
-                sendToRenderer('main:bot-status-update', { state: 'Parando' });
+                // REMOVED: sendToRenderer('main:bot-status-update', { state: 'Parando' });
             } else {
                 console.warn('[Main] stdin do Bot não está disponível ou destruído, tentando kill...');
                 killBotProcess();
@@ -196,7 +197,7 @@ function stopBotProcess() {
         }
     } else {
         console.warn('[Main] Tentativa de parar Bot, mas nenhum processo está rodando ou é inválido.');
-        if (!botProcess) { sendToRenderer('main:bot-status-update', { state: 'Ocioso' }); }
+        // REMOVED: if (!botProcess) { sendToRenderer('main:bot-status-update', { state: 'Ocioso' }); }
     }
 }
 
@@ -251,7 +252,7 @@ ipcMain.handle('bot:start-and-configure', async (event, configData) => {
     await new Promise(resolve => setTimeout(resolve, 300));
     const startCommand = { command: 'start', payload: { run_id: `run_${Date.now()}` } };
     const startResult = sendCommandToBot(startCommand);
-    if(startResult.success) { sendToRenderer('main:bot-status-update', { state: 'Rodando' }); }
+    // REMOVED: if(startResult.success) { sendToRenderer('main:bot-status-update', { state: 'Rodando' }); }
     return startResult;
 });
 

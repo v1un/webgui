@@ -1,8 +1,8 @@
-﻿// src/pages/ConfigBuilderPage.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useConfigStore } from '../store/configStore';
 import { useSnackbar } from '../context/SnackbarContext';
+import { BotConfig, InteractionMode, DetectionMethod } from '../electron.d';
 
 // MUI Imports
 import Box from '@mui/material/Box';
@@ -10,222 +10,687 @@ import Typography from '@mui/material/Typography';
 import Paper from '@mui/material/Paper';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
-import Select, { SelectChangeEvent } from '@mui/material/Select';
+import List from '@mui/material/List';
+import ListItemText from '@mui/material/ListItemText';
+import Divider from '@mui/material/Divider';
+import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import SaveIcon from '@mui/icons-material/Save';
+import InputLabel from '@mui/material/InputLabel';
+import FormControl from '@mui/material/FormControl';
+import IconButton from '@mui/material/IconButton';
 import SendToMobileIcon from '@mui/icons-material/SendToMobile';
+import SaveIcon from '@mui/icons-material/Save';
 import FileOpenIcon from '@mui/icons-material/FileOpen';
+import DeleteIcon from '@mui/icons-material/Delete';
 import Tooltip from '@mui/material/Tooltip';
-import CircularProgress from '@mui/material/CircularProgress'; // Para indicar loading
+import AddBoxIcon from '@mui/icons-material/AddBox';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 
-// Importar tipos
-import type { BotConfig, InteractionMode, DetectionMethod } from '../electron.d';
+// Hello Pangea DnD Imports (replaces react-beautiful-dnd)
+import {
+    DragDropContext,
+    Droppable,
+    Draggable,
+    DropResult,
+    DroppableProvided,
+    DraggableProvided,
+    DraggableStateSnapshot
+} from '@hello-pangea/dnd'; // Changed import path
 
-// Valores de exemplo para selects
-const gameOptions: string[] = ['GameXYZ', 'GameABC', 'Outro'];
-const scriptOptions: string[] = ['path/to/script_a.lua', 'path/to/script_b.py', 'teste_interno_1'];
-const interactionModes: InteractionMode[] = ['input_simulation', 'memory_read', 'network_intercept'];
-const detectionMethods: DetectionMethod[] = ['log_scan', 'visual_change', 'process_exit'];
+// Define the structure for our draggable items (used for available blocks)
+interface AvailableBlockItem {
+    id: string; // react-beautiful-dnd requires string IDs
+    type: string;
+}
+
+// Define the structure for items on the canvas, including their values
+interface CanvasBlockItem extends AvailableBlockItem {
+    instanceId: string; // Unique ID for this instance on the canvas
+    value: any;
+}
+
+
+// --- Components for Draggable Items ---
+
+// Component for items in the source list (side panel)
+const AvailableBlock: React.FC<{
+    item: AvailableBlockItem;
+    index: number;
+}> = ({ item, index }) => {
+    return (
+        <Draggable draggableId={item.id} index={index}>
+            {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
+                <Paper
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    {...provided.dragHandleProps} // Use whole item as handle for sidebar
+                    elevation={snapshot.isDragging ? 4 : 2}
+                    sx={(theme) => ({
+                        p: 1,
+                        mb: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        userSelect: 'none', // Prevent text selection during drag
+                        backgroundColor: snapshot.isDragging ? theme.palette.action.hover : theme.palette.grey[800], // Changed for dark theme
+                        opacity: snapshot.isDragging ? 0.9 : 1,
+                        // Add any other dragging styles if needed
+                    })}
+                >
+                    <AddBoxIcon sx={{ mr: 1, color: 'action.active' }} />
+                    <ListItemText primary={item.type} />
+                </Paper>
+            )}
+        </Draggable>
+    );
+};
+
+// Component for items in the target list (canvas)
+const CanvasBlock: React.FC<{
+    item: CanvasBlockItem;
+    index: number;
+    onValueChange: (instanceId: string, value: any) => void;
+    onRemove: (instanceId: string) => void;
+    jsonErrorBlockId: string | null;
+}> = ({ item, index, onValueChange, onRemove, jsonErrorBlockId }) => {
+
+    const renderInput = () => {
+        const commonProps = {
+            value: item.value ?? '',
+            onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onValueChange(item.instanceId, e.target.value),
+            variant: "outlined" as "outlined",
+            size: "small" as "small",
+            sx: { mt: 1, width: '100%' }
+        };
+
+        switch (item.type) {
+            case 'Game':
+                const gameOptions = ['Game1', 'Game2', 'Another Game'];
+                return (
+                    <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                        <InputLabel>Select Game</InputLabel>
+                        <Select
+                            label="Select Game"
+                            value={item.value ?? ''}
+                            onChange={(e) => onValueChange(item.instanceId, e.target.value)}
+                        >
+                            {gameOptions.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                        </Select>
+                    </FormControl>
+                );
+            case 'Script':
+                return <TextField label="Script Name" {...commonProps} />;
+            case 'Duration':
+            case 'Startup Delay':
+                 return <TextField label={item.type} type="number" {...commonProps} InputProps={{ inputProps: { min: 0 } }} />;
+            case 'Interaction Mode':
+                const interactionModes: InteractionMode[] = ['input_simulation', 'memory_read', 'network_intercept'];
+                 return (
+                    <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                        <InputLabel>Mode</InputLabel>
+                        <Select
+                            label="Mode"
+                            value={item.value ?? ''}
+                            onChange={(e) => onValueChange(item.instanceId, e.target.value as InteractionMode)}
+                        >
+                            {interactionModes.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                        </Select>
+                    </FormControl>
+                );
+            case 'Detection Method':
+                 const detectionMethods: DetectionMethod[] = ['log_scan', 'visual_change', 'process_exit'];
+                 return (
+                    <FormControl fullWidth size="small" sx={{ mt: 1 }}>
+                        <InputLabel>Method</InputLabel>
+                        <Select
+                            label="Method"
+                            value={item.value ?? ''}
+                            onChange={(e) => onValueChange(item.instanceId, e.target.value as DetectionMethod)}
+                        >
+                            {detectionMethods.map(opt => <MenuItem key={opt} value={opt}>{opt}</MenuItem>)}
+                        </Select>
+                    </FormControl>
+                );
+            case 'Parameters (JSON)':
+                return <TextField
+                            label="Parameters (JSON format)"
+                            multiline
+                            rows={3}
+                            {...commonProps}
+                            error={item.instanceId === jsonErrorBlockId}
+                            helperText={item.instanceId === jsonErrorBlockId ? "Invalid JSON format" : ""}
+                       />;
+            default:
+                return <Typography variant="caption">No input defined for this block type.</Typography>;
+        }
+    };
+
+    return (
+        <Draggable draggableId={item.instanceId} index={index}>
+            {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
+                <Paper
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    // {...provided.dragHandleProps} // Drag handle is applied below
+                    elevation={snapshot.isDragging ? 6 : 3}
+                    sx={(theme) => ({ // Pass theme via function
+                        p: 2,
+                        mb: 1.5,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        userSelect: 'none',
+                        backgroundColor: theme.palette.grey[800], // Changed for better dark theme contrast
+                        border: item.instanceId === jsonErrorBlockId ? '2px solid red' : 'none',
+                        position: 'relative',
+                        opacity: snapshot.isDragging ? 0.8 : 1,
+                    })}
+                >
+                    {/* Drag Handle */}
+                    <Box {...provided.dragHandleProps} sx={{ cursor: 'grab', mr: 1.5, pt: '4px', display: 'inline-flex' }}>
+                         <DragIndicatorIcon sx={{ color: 'action.active' }} />
+                    </Box>
+                    {/* Block Content */}
+                    <Box sx={{ flexGrow: 1 }}>
+                        <Typography variant="subtitle1">{item.type}</Typography>
+                        {renderInput()}
+                    </Box>
+                     {/* Remove Button */}
+                     <IconButton
+                         onClick={() => onRemove(item.instanceId)}
+                         size="small"
+                         sx={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            color: 'action.active',
+                            '&:hover': { color: 'error.main' },
+                         }}
+                         aria-label="Remove block"
+                     >
+                         <DeleteIcon fontSize="small" />
+                     </IconButton>
+                </Paper>
+            )}
+        </Draggable>
+    );
+};
+
+
+// --- Utility Functions ---
+
+const isValidJson = (str: string): boolean => {
+    if (!str?.trim()) return true;
+    try {
+        JSON.parse(str);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+// Helper to reorder lists for react-beautiful-dnd
+const reorder = <TList extends unknown[]>(list: TList, startIndex: number, endIndex: number): TList => {
+    const result = Array.from(list);
+    const [removed] = result.splice(startIndex, 1);
+    result.splice(endIndex, 0, removed);
+    return result as TList;
+};
+
+
+const buildConfigFromCanvas = (
+    configName: string,
+    blocks: CanvasBlockItem[]
+): { config: BotConfig | null; error?: string, errorBlockId?: string } => { // errorBlockId is now string
+    if (!configName) {
+        return { config: null, error: 'Configuration Name is required.' };
+    }
+
+    const config: Partial<BotConfig> = { name: configName };
+    let error: string | undefined = undefined;
+    let errorBlockId: string | undefined = undefined; // Changed to string
+    const usedTypes = new Set<string>();
+
+    for (const block of blocks) {
+        const blockType = block.type;
+        const blockValue = block.value;
+
+        const singleInstanceTypes = ['Game', 'Script', 'Duration', 'Startup Delay', 'Interaction Mode', 'Detection Method', 'Parameters (JSON)'];
+        if (singleInstanceTypes.includes(blockType)) {
+            if (usedTypes.has(blockType)) {
+                 console.warn(`Duplicate block type found: ${blockType}. Using the first instance.`);
+                 continue;
+            }
+            usedTypes.add(blockType);
+        }
+
+        switch (blockType) {
+            case 'Game':
+                if (!blockValue) return { config: null, error: `'${blockType}' block requires a selection.` };
+                config.game = blockValue;
+                break;
+            case 'Script':
+                 if (!blockValue) return { config: null, error: `'${blockType}' block requires a name.` };
+                config.script = blockValue;
+                break;
+            case 'Duration':
+                const duration = parseInt(blockValue, 10);
+                if (blockValue === null || blockValue === undefined || isNaN(duration) || duration < 0) return { config: null, error: `'${blockType}' must be a non-negative number.` };
+                config.durationMinutes = duration;
+                break;
+            case 'Startup Delay':
+                 const delay = parseInt(blockValue, 10);
+                 if (blockValue === null || blockValue === undefined || isNaN(delay) || delay < 0) return { config: null, error: `'${blockType}' must be a non-negative number.` };
+                config.startupDelaySeconds = delay;
+                break;
+            case 'Interaction Mode':
+                 if (!blockValue) return { config: null, error: `'${blockType}' block requires a selection.` };
+                config.interactionMode = blockValue as InteractionMode;
+                break;
+            case 'Detection Method':
+                 if (!blockValue) return { config: null, error: `'${blockType}' block requires a selection.` };
+                config.detectionMethod = blockValue as DetectionMethod;
+                break;
+            case 'Parameters (JSON)':
+                if (blockValue && !isValidJson(blockValue)) {
+                    return { config: null, error: `'${blockType}' block contains invalid JSON.`, errorBlockId: block.instanceId }; // Use instanceId
+                }
+                try {
+                     config.params = (blockValue && blockValue.trim()) ? JSON.parse(blockValue) : undefined;
+                } catch {
+                     return { config: null, error: `Error parsing '${blockType}' JSON.`, errorBlockId: block.instanceId }; // Use instanceId
+                }
+                break;
+            default:
+                console.warn(`Unknown block type encountered during parsing: ${blockType}`);
+        }
+    }
+
+    if (!config.game && !config.script) {
+        // Allow for now
+    }
+
+    return { config: config as BotConfig, error, errorBlockId };
+};
+
+
+// --- Main Page Component ---
 
 const ConfigBuilderPage: React.FC = () => {
     const navigate = useNavigate();
     const { showSnackbar } = useSnackbar();
     const setActiveConfig = useConfigStore((state) => state.setActiveConfig);
-    const currentActiveConfig = useConfigStore((state) => state.activeConfig);
-    const api = window.electronAPI; // Obter API do preload
+    const api = window.electronAPI;
 
-    // Estado do formulário
     const [configName, setConfigName] = useState('');
-    const [game, setGame] = useState('');
-    const [script, setScript] = useState('');
-    const [duration, setDuration] = useState('');
-    const [startupDelay, setStartupDelay] = useState('');
-    const [interactionMode, setInteractionMode] = useState<InteractionMode | ''>('');
-    const [detectionMethod, setDetectionMethod] = useState<DetectionMethod | ''>('');
-    const [paramsJson, setParamsJson] = useState('{\n  "key": "value"\n}');
-    const [paramsError, setParamsError] = useState<string | null>(null);
-    // Estado de loading para operações de ficheiro
     const [isSaving, setIsSaving] = useState(false);
     const [isLoadingFile, setIsLoadingFile] = useState(false);
+    const [jsonErrorBlockId, setJsonErrorBlockId] = useState<string | null>(null); // Changed to string
 
-    // Função para carregar dados no formulário (usada ao carregar config ativa e de ficheiro)
-    const loadConfigIntoForm = useCallback((config: BotConfig | null) => {
-        if (config) {
-            setConfigName(config.configName || `Config_${Date.now()}`);
-            setGame(config.game || '');
-            setScript(config.script || '');
-            setDuration(config.duration || '');
-            setStartupDelay(config.startupDelay || '');
-            setInteractionMode(config.interactionMode || '');
-            setDetectionMethod(config.detectionMethod || '');
-            try {
-                setParamsJson(JSON.stringify(config.params || {}, null, 2));
-                setParamsError(null);
-            } catch {
-                setParamsJson('{}');
-                setParamsError('Parâmetros da configuração carregada não são JSON válido.');
-                showSnackbar('Atenção: Parâmetros da configuração carregada não são JSON válido.', 'warning');
+    // Available blocks in the side panel
+    const initialAvailableBlocks: AvailableBlockItem[] = [
+        { id: 'game', type: 'Game' },
+        { id: 'script', type: 'Script' },
+        { id: 'duration', type: 'Duration' },
+        { id: 'startupDelay', type: 'Startup Delay' },
+        { id: 'interactionMode', type: 'Interaction Mode' },
+        { id: 'detectionMethod', type: 'Detection Method' },
+        { id: 'params', type: 'Parameters (JSON)' },
+    ];
+    // Note: We don't modify availableBlocks state, it's static
+    const [availableBlocks] = useState<AvailableBlockItem[]>(initialAvailableBlocks);
+
+    // Blocks currently on the canvas
+    const [canvasBlocks, setCanvasBlocks] = useState<CanvasBlockItem[]>([]);
+
+    // Handler to update the value of a specific block on the canvas
+    const handleBlockValueChange = useCallback((instanceId: string, newValue: any) => {
+        setCanvasBlocks(prevBlocks =>
+            prevBlocks.map(block =>
+                block.instanceId === instanceId ? { ...block, value: newValue } : block
+            )
+        );
+        if (instanceId === jsonErrorBlockId) {
+            setJsonErrorBlockId(null);
+        }
+    }, [jsonErrorBlockId]);
+
+    // Add remove block handler
+    const handleRemoveBlock = useCallback((instanceIdToRemove: string) => {
+        setCanvasBlocks(prev => prev.filter(block => block.instanceId !== instanceIdToRemove));
+        if (instanceIdToRemove === jsonErrorBlockId) {
+            setJsonErrorBlockId(null);
+        }
+    }, [jsonErrorBlockId]);
+
+
+    // --- react-beautiful-dnd Drag End Handler ---
+    const onDragEnd = (result: DropResult) => {
+        const { source, destination, draggableId } = result;
+
+        // Dropped outside any droppable area
+        if (!destination) {
+            return;
+        }
+
+        // Dropped in the same place
+        if (
+            destination.droppableId === source.droppableId &&
+            destination.index === source.index
+        ) {
+            return;
+        }
+
+        // --- Reordering within the Canvas ---
+        if (source.droppableId === 'canvas-area' && destination.droppableId === 'canvas-area') {
+            const reorderedBlocks = reorder(
+                canvasBlocks,
+                source.index,
+                destination.index
+            );
+            setCanvasBlocks(reorderedBlocks);
+        }
+        // --- Dragging from Sidebar to Canvas ---
+        else if (source.droppableId === 'available-blocks' && destination.droppableId === 'canvas-area') {
+            // Find the original block type from the available list
+            const sourceBlock = availableBlocks.find(block => block.id === draggableId);
+            if (!sourceBlock) return; // Should not happen
+
+            // Create a new instance for the canvas
+            const newCanvasBlock: CanvasBlockItem = {
+                id: sourceBlock.id, // Keep original type ID
+                instanceId: `${sourceBlock.id}-${Date.now()}`, // Create unique instance ID
+                type: sourceBlock.type,
+                value: null, // Initialize value
+            };
+
+            // Insert the new block into the canvas list at the destination index
+            const newCanvasList = Array.from(canvasBlocks);
+            newCanvasList.splice(destination.index, 0, newCanvasBlock);
+            setCanvasBlocks(newCanvasList);
+            setJsonErrorBlockId(null); // Clear errors when adding
+        }
+
+        // Other scenarios (e.g., dragging from canvas to sidebar) are ignored
+    };
+
+
+    // Function to populate canvas from a loaded config
+    const loadConfigToCanvas = (loadedConfig: BotConfig) => {
+        const newCanvasBlocks: CanvasBlockItem[] = [];
+        const timestamp = Date.now();
+
+        const addBlock = (type: string, idBase: string, value: any) => {
+             const configKey = idBase === 'duration' ? 'durationMinutes'
+                             : idBase === 'startupDelay' ? 'startupDelaySeconds'
+                             : idBase === 'params' ? 'params'
+                             : idBase;
+
+            if (Object.prototype.hasOwnProperty.call(loadedConfig, configKey)) {
+                 let processedValue = value;
+                 if (type === 'Parameters (JSON)' && value !== undefined && value !== null) {
+                     try {
+                         processedValue = JSON.stringify(value, null, 2);
+                     } catch (e) {
+                         console.error(`Error stringifying loaded params for ${idBase}:`, e);
+                         showSnackbar(`Failed to stringify parameters for ${type} from loaded file.`, 'error');
+                         processedValue = "{}";
+                     }
+                 }
+
+                newCanvasBlocks.push({
+                    id: idBase, // Original type ID
+                    instanceId: `${idBase}-${timestamp}-${newCanvasBlocks.length}`, // Unique instance ID
+                    type: type,
+                    value: processedValue,
+                });
             }
-        } else {
-            // Resetar se config for null
-            setConfigName(''); setGame(''); setScript(''); setDuration('');
-            setStartupDelay(''); setInteractionMode(''); setDetectionMethod('');
-            setParamsJson('{\n  "key": "value"\n}'); setParamsError(null);
-        }
-    }, [showSnackbar]); // Adicionar showSnackbar como dependência
-
-    // Carregar configuração ativa ao montar
-    useEffect(() => {
-        loadConfigIntoForm(currentActiveConfig);
-    }, [currentActiveConfig, loadConfigIntoForm]); // Usar a função de carregar
-
-    // Validar JSON
-    const handleParamsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const jsonString = event.target.value;
-        setParamsJson(jsonString);
-        try { JSON.parse(jsonString); setParamsError(null); }
-        catch (error) { setParamsError("JSON inválido."); }
-    };
-
-    // Handlers específicos para Selects
-    const handleInteractionModeChange = (event: SelectChangeEvent) => { setInteractionMode(event.target.value as InteractionMode | ''); };
-    const handleDetectionMethodChange = (event: SelectChangeEvent) => { setDetectionMethod(event.target.value as DetectionMethod | ''); };
-
-    // Construir objeto de configuração
-    const buildConfigObject = useCallback((): BotConfig | null => {
-        let parsedParams: any = null;
-        try {
-            parsedParams = JSON.parse(paramsJson); setParamsError(null);
-        } catch (error) {
-            setParamsError("JSON inválido. Corrija antes de salvar/enviar.");
-            showSnackbar("Erro nos Parâmetros: O formato JSON é inválido.", "error");
-            return null;
-        }
-        if (!game) {
-            showSnackbar("Erro: O campo 'Jogo Alvo' é obrigatório.", "warning"); return null;
-        }
-        return {
-            configName: configName.trim() || `Config_${Date.now()}`, game: game,
-            script: script || undefined, duration: duration.trim() || null,
-            startupDelay: startupDelay.trim() || undefined,
-            interactionMode: interactionMode || undefined,
-            detectionMethod: detectionMethod || undefined, params: parsedParams,
         };
-    }, [configName, game, script, duration, startupDelay, interactionMode, detectionMethod, paramsJson, showSnackbar]);
 
-    // Handler para "Enviar para Controle"
+        setConfigName(loadedConfig.name || '');
+
+        // Map available block types to config fields and add them
+        // Ensure the 'type' and 'idBase' match the definitions in initialAvailableBlocks
+        addBlock('Game', 'game', loadedConfig.game);
+        addBlock('Script', 'script', loadedConfig.script);
+        addBlock('Duration', 'duration', loadedConfig.durationMinutes);
+        addBlock('Startup Delay', 'startupDelay', loadedConfig.startupDelaySeconds);
+        addBlock('Interaction Mode', 'interactionMode', loadedConfig.interactionMode);
+        addBlock('Detection Method', 'detectionMethod', loadedConfig.detectionMethod);
+        addBlock('Parameters (JSON)', 'params', loadedConfig.params);
+
+        setCanvasBlocks(newCanvasBlocks);
+        setJsonErrorBlockId(null);
+        showSnackbar('Configuration loaded successfully.', 'success');
+    };
+
+
+    // --- Action Handlers (Unchanged) ---
+
     const handleSendToControlPanel = () => {
-        const config = buildConfigObject();
+        setJsonErrorBlockId(null);
+        const { config, error, errorBlockId } = buildConfigFromCanvas(configName, canvasBlocks);
+
+        if (error) {
+            showSnackbar(error, 'error');
+            if (errorBlockId) {
+                setJsonErrorBlockId(errorBlockId);
+            }
+            return;
+        }
+
         if (config) {
+            console.log("Sending config:", config);
             setActiveConfig(config);
-            showSnackbar(`Configuração "${config.configName}" enviada para o Painel de Controle!`, 'success');
+            showSnackbar(`Configuration "${config.name}" set as active.`, 'success');
             navigate('/bot-control');
+        } else {
+            showSnackbar('Failed to build configuration.', 'error');
         }
     };
 
-    // --- **Handlers Atualizados para Salvar/Carregar Ficheiro** ---
     const handleSaveToFile = async () => {
-        const config = buildConfigObject();
-        if (!config) return; // Abortar se config for inválida
-        if (!api?.saveFileDialog) { showSnackbar("Erro: API para salvar ficheiro não disponível.", "error"); return; }
+        setJsonErrorBlockId(null);
+        const { config, error, errorBlockId } = buildConfigFromCanvas(configName, canvasBlocks);
+
+        if (error) {
+            showSnackbar(error, 'error');
+             if (errorBlockId) {
+                setJsonErrorBlockId(errorBlockId);
+            }
+            return;
+        }
+
+        if (!config) {
+             showSnackbar('Cannot save - configuration is incomplete or invalid.', 'warning');
+             return;
+        }
 
         setIsSaving(true);
         try {
-            // Sugerir nome do ficheiro baseado no nome da config
-            const defaultFilename = config.configName ? `${config.configName.replace(/[^a-z0-9]/gi, '_')}.json` : 'bot_config.json';
-            const result = await api.saveFileDialog(JSON.stringify(config, null, 2), defaultFilename);
-
+            const defaultName = config.name ? `${config.name}.json` : 'bot_config.json';
+            const result = await api.saveFileDialog(JSON.stringify(config, null, 2), defaultName);
             if (result.success && result.filePath) {
-                showSnackbar(`Configuração salva em: ${result.filePath}`, 'success');
+                showSnackbar(`Configuration saved to ${result.filePath}`, 'success');
+            } else if (!result.canceled && result.error) {
+                showSnackbar(result.error, 'error');
             } else if (!result.canceled) {
-                // Não mostrar snackbar se apenas cancelou
-                showSnackbar(`Erro ao salvar ficheiro: ${result.error || 'Erro desconhecido'}`, 'error');
+                 showSnackbar('Failed to save file (unknown reason).', 'error');
             }
-        } catch (error: any) {
-            console.error("Erro ao chamar saveFileDialog:", error);
-            showSnackbar(`Erro inesperado ao salvar: ${error.message}`, 'error');
+        } catch (err: any) {
+            console.error("Save file error:", err);
+            showSnackbar(err.message || 'An error occurred during save.', 'error');
         } finally {
             setIsSaving(false);
         }
     };
 
     const handleLoadFromFile = async () => {
-        if (!api?.openFileDialog) { showSnackbar("Erro: API para abrir ficheiro não disponível.", "error"); return; }
-
         setIsLoadingFile(true);
+        setJsonErrorBlockId(null);
+        setCanvasBlocks([]);
+        setConfigName('');
         try {
             const result = await api.openFileDialog();
-
-            if (result.success && result.content && result.filePath) {
+            if (result.success && result.content) {
                 try {
-                    const parsedConfig: BotConfig = JSON.parse(result.content);
-                    // TODO: Adicionar validação mais robusta do schema do parsedConfig se necessário
-                    loadConfigIntoForm(parsedConfig); // Carrega os dados no formulário
-                    showSnackbar(`Configuração carregada de: ${result.filePath}`, 'success');
+                    const loadedConfig = JSON.parse(result.content) as BotConfig;
+                    if (typeof loadedConfig !== 'object' || loadedConfig === null) {
+                         throw new Error("Invalid configuration file structure (not an object).");
+                    }
+                    if (!loadedConfig.name && !loadedConfig.game && !loadedConfig.script && !loadedConfig.params) {
+                         console.warn("Loaded config seems empty or lacks key fields.");
+                    }
+                    loadConfigToCanvas(loadedConfig);
                 } catch (parseError: any) {
-                    console.error("Erro ao parsear JSON do ficheiro:", parseError);
-                    showSnackbar(`Erro ao processar ficheiro: JSON inválido (${parseError.message})`, 'error');
-                    setParamsError("Erro ao carregar JSON do ficheiro."); // Indicar erro no campo JSON
+                    console.error("Load file parse error:", parseError);
+                    showSnackbar(`Failed to parse JSON file: ${parseError.message}`, 'error');
                 }
-            } else if (!result.canceled) {
-                showSnackbar(`Erro ao carregar ficheiro: ${result.error || 'Erro desconhecido'}`, 'error');
+            } else if (result.error) {
+                showSnackbar(result.error, 'error');
             }
-            // Não fazer nada se cancelado
-        } catch (error: any) {
-            console.error("Erro ao chamar openFileDialog:", error);
-            showSnackbar(`Erro inesperado ao carregar: ${error.message}`, 'error');
+        } catch (err: any) {
+            console.error("Load file error:", err);
+            showSnackbar(err.message || 'An error occurred during load.', 'error');
         } finally {
             setIsLoadingFile(false);
         }
     };
-    // --- Fim Handlers Atualizados ---
+
 
     return (
-        <Box>
-            <Typography variant="h4" gutterBottom> Construtor de Configuração do Bot </Typography>
-            <Paper elevation={2} sx={{ p: 3 }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    {/* Seção 1: Nome e Jogo */}
-                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3 }}>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><TextField fullWidth label="Nome da Configuração (Opcional)" variant="outlined" value={configName} onChange={(e) => setConfigName(e.target.value)} size="small" /></Box>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}>
-                            <FormControl fullWidth size="small" required><InputLabel id="game-select-label">Jogo Alvo</InputLabel><Select labelId="game-select-label" value={game} label="Jogo Alvo *" onChange={(e: SelectChangeEvent) => setGame(e.target.value)} >{gameOptions.map(option => (<MenuItem key={option} value={option}>{option}</MenuItem>))}</Select></FormControl>
-                        </Box>
+        <DragDropContext onDragEnd={onDragEnd}>
+            <Box sx={{ p: 2 }}>
+                <Typography variant="h4" gutterBottom> Visual Config Builder </Typography>
+                <Box display="flex" gap={3} sx={{ flexDirection: { xs: 'column', md: 'row' }, overflowX: 'hidden' }}> {/* Keep overflow hidden on main flex container */}
+                    {/* --- Side Panel (Available Blocks) --- */}
+                    <Box sx={{ width: { xs: '100%', md: '25%' } }}>
+                        <Paper elevation={1} sx={{ p: 2, height: { xs: 'auto', md: 'calc(100vh - 200px)' }, overflowY: 'auto' }}>
+                            <Typography variant="h6" gutterBottom>Available Blocks</Typography>
+                            <Divider sx={{ mb: 2 }} />
+                            <Droppable droppableId="available-blocks" isDropDisabled={true}>
+                                {(provided: DroppableProvided) => (
+                                    <List
+                                        dense
+                                        ref={provided.innerRef}
+                                        {...provided.droppableProps}
+                                    >
+                                        {availableBlocks.map((item, index) => (
+                                            <AvailableBlock key={item.id} item={item} index={index} />
+                                        ))}
+                                        {provided.placeholder} {/* Important for spacing */}
+                                    </List>
+                                )}
+                            </Droppable>
+                        </Paper>
                     </Box>
-                    {/* Seção 2: Script e Duração */}
-                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3 }}>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><FormControl fullWidth size="small"><InputLabel id="script-select-label">Script de Teste (Opcional)</InputLabel><Select labelId="script-select-label" value={script} label="Script de Teste (Opcional)" onChange={(e: SelectChangeEvent) => setScript(e.target.value)} ><MenuItem value=""><em>Nenhum</em></MenuItem>{scriptOptions.map(option => (<MenuItem key={option} value={option}>{option}</MenuItem>))}</Select></FormControl></Box>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><TextField fullWidth label="Duração Máxima (Opcional)" placeholder="Ex: 10m, 1h, 30s" variant="outlined" value={duration} onChange={(e) => setDuration(e.target.value)} size="small" /></Box>
-                    </Box>
-                    {/* Seção 3: Atraso Inicial e Modo Interação */}
-                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3 }}>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><TextField fullWidth label="Atraso Inicial (Opcional)" placeholder="Ex: 5s, 1m" variant="outlined" value={startupDelay} onChange={(e) => setStartupDelay(e.target.value)} size="small" /></Box>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><FormControl fullWidth size="small"><InputLabel id="interaction-select-label">Modo de Interação (Opcional)</InputLabel><Select labelId="interaction-select-label" value={interactionMode} label="Modo de Interação (Opcional)" onChange={handleInteractionModeChange} ><MenuItem value=""><em>Padrão</em></MenuItem>{interactionModes.map(option => (<MenuItem key={option} value={option}>{option}</MenuItem>))}</Select></FormControl></Box>
-                    </Box>
-                    {/* Seção 4: Método Detecção */}
-                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 3 }}>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}><FormControl fullWidth size="small"><InputLabel id="detection-select-label">Método de Detecção (Opcional)</InputLabel><Select labelId="detection-select-label" value={detectionMethod} label="Método de Detecção (Opcional)" onChange={handleDetectionMethodChange} ><MenuItem value=""><em>Padrão</em></MenuItem>{detectionMethods.map(option => (<MenuItem key={option} value={option}>{option}</MenuItem>))}</Select></FormControl></Box>
-                        <Box sx={{ width: { xs: '100%', sm: '50%' } }}></Box> {/* Espaço vazio */}
-                    </Box>
-                    {/* Seção 5: Parâmetros JSON */}
-                    <Box><TextField fullWidth label="Parâmetros Específicos (JSON)" multiline rows={6} variant="outlined" value={paramsJson} onChange={handleParamsChange} error={!!paramsError} helperText={paramsError || "Insira um objeto JSON válido."} InputProps={{ sx: { fontFamily: 'monospace' } }} /></Box>
-                    {/* Seção 6: Ações */}
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, flexWrap: 'wrap', mt: 2 }}>
-                        <Tooltip title="Carregar configuração de um ficheiro .json"><span> {/* Span para tooltip em botão desabilitado */}
-                            <Button variant="outlined" startIcon={isLoadingFile ? <CircularProgress size={20}/> : <FileOpenIcon />} onClick={handleLoadFromFile} disabled={isLoadingFile || isSaving}> Carregar de Ficheiro </Button>
-                         </span></Tooltip>
-                        <Tooltip title="Salvar esta configuração num ficheiro .json"><span> {/* Span para tooltip em botão desabilitado */}
-                            <Button variant="outlined" startIcon={isSaving ? <CircularProgress size={20}/> : <SaveIcon />} onClick={handleSaveToFile} disabled={isLoadingFile || isSaving || !!paramsError}> Salvar em Ficheiro </Button>
-                         </span></Tooltip>
-                        <Tooltip title="Usar esta configuração na página de Controle do Bot"><span> {/* Span para tooltip em botão desabilitado */}
-                            <Button variant="contained" color="primary" startIcon={<SendToMobileIcon />} onClick={handleSendToControlPanel} disabled={isLoadingFile || isSaving || !!paramsError || !game} > Enviar para Controle </Button>
-                         </span></Tooltip>
+
+                    {/* --- Canvas Area (Dropped Blocks) --- */}
+                    <Box sx={{ width: { xs: '100%', md: '75%' }, display: 'flex', flexDirection: 'column' }}>
+                         <TextField
+                            fullWidth
+                            label="Configuration Name (Required)"
+                            variant="outlined"
+                            value={configName}
+                            onChange={(e) => setConfigName(e.target.value)}
+                            size="small"
+                            sx={{ mb: 2 }}
+                         />
+                        <Paper
+                            elevation={1}
+                            sx={(theme) => ({
+                                p: 3,
+                                minHeight: 'calc(100vh - 250px)',
+                                backgroundColor: 'background.paper',
+                                border: `2px dashed ${theme.palette.divider}`,
+                                display: 'flex',
+                                flexDirection: 'column',
+                            })}
+                        >
+                            <Typography variant="subtitle1" sx={{ mb: 2, color: 'text.secondary', textAlign: 'center' }}>
+                                Drag blocks here to build configuration
+                            </Typography>
+                            <Droppable droppableId="canvas-area">
+                                {(provided: DroppableProvided, snapshot) => (
+                                    <Box
+                                        ref={provided.innerRef}
+                                        {...provided.droppableProps}
+                                        sx={{
+                                            flexGrow: 1,
+                                            backgroundColor: snapshot.isDraggingOver ? 'action.focus' : 'transparent', // Highlight drop zone
+                                            transition: 'background-color 0.2s ease',
+                                            borderRadius: 1, // Optional: match paper radius
+                                        }}
+                                    >
+                                        {canvasBlocks.length > 0 ? (
+                                            canvasBlocks.map((item, index) => (
+                                                <CanvasBlock
+                                                    key={item.instanceId} // Use unique instanceId for key
+                                                    item={item}
+                                                    index={index}
+                                                    onValueChange={handleBlockValueChange}
+                                                    onRemove={handleRemoveBlock}
+                                                    jsonErrorBlockId={jsonErrorBlockId}
+                                                />
+                                            ))
+                                        ) : (
+                                            !snapshot.isDraggingOver && ( // Only show if not dragging over
+                                                <Box sx={{ textAlign: 'center', color: 'text.disabled', mt: 4, p: 2 }}>
+                                                    <Typography>Canvas is empty</Typography>
+                                                </Box>
+                                            )
+                                        )}
+                                        {provided.placeholder} {/* Important for spacing */}
+                                    </Box>
+                                )}
+                            </Droppable>
+                        </Paper>
                     </Box>
                 </Box>
-            </Paper>
-        </Box>
+
+                 {/* --- Action Buttons --- */}
+                 <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, flexWrap: 'wrap', mt: 3 }}>
+                     <Tooltip title="Load configuration from a .json file">
+                         <span>
+                             <Button
+                                 variant="outlined"
+                                 startIcon={<FileOpenIcon />}
+                                 onClick={handleLoadFromFile}
+                                 disabled={isLoadingFile || isSaving}
+                                 sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { borderColor: 'primary.dark', backgroundColor: 'action.hover' } }}
+                             >
+                                 Load from File
+                             </Button>
+                         </span>
+                     </Tooltip>
+                     <Tooltip title={!configName ? "Enter a Configuration Name first" : canvasBlocks.length === 0 ? "Add blocks to the canvas first" : "Save this configuration layout to a .json file"}>
+                         <span>
+                             <Button
+                                 variant="outlined"
+                                 startIcon={<SaveIcon />}
+                                 onClick={handleSaveToFile}
+                                 disabled={isLoadingFile || isSaving || canvasBlocks.length === 0 || !configName}
+                                 sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { borderColor: 'primary.dark', backgroundColor: 'action.hover' } }}
+                             >
+                                 Save to File
+                             </Button>
+                         </span>
+                     </Tooltip>
+                     <Tooltip title={!configName ? "Enter a Configuration Name first" : canvasBlocks.length === 0 ? "Add blocks to the canvas first" : "Parse and use this configuration in the Bot Control page"}>
+                         <span>
+                             <Button
+                                 variant="contained"
+                                 color="primary"
+                                 startIcon={<SendToMobileIcon />}
+                                 onClick={handleSendToControlPanel}
+                                 disabled={isLoadingFile || isSaving || canvasBlocks.length === 0 || !configName}
+                                 sx={{ backgroundColor: 'primary.main', color: 'primary.contrastText', '&:hover': { backgroundColor: 'primary.dark' } }}
+                             >
+                                 Send to Control
+                             </Button>
+                         </span>
+                     </Tooltip>
+                 </Box>
+            </Box>
+        </DragDropContext>
     );
 };
 

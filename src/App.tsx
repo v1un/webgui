@@ -9,6 +9,7 @@ import ConfigBuilderPage from './pages/ConfigBuilderPage'; // Importar nova pág
 import AnkiGeneratorPage from './pages/AnkiGeneratorPage'; // <-- Importar página Anki
 import AdminInviteCodesPage from './pages/admin/AdminInviteCodesPage';
 import AdminUsersPage from './pages/admin/AdminUsersPage';
+import StudyPage from './pages/StudyPage'; // Import the new Study Page
 import ProtectedRoute from './components/ProtectedRoute';
 import AppLayout from './components/AppLayout';
 import './App.css';
@@ -31,6 +32,8 @@ function App() {
                     <Route path="/history" element={<HistoryPage />} />
                     {/* ROTA ADICIONADA para o Gerador Anki */}
                     <Route path="/anki-generator" element={<AnkiGeneratorPage />} />
+                    {/* ROTA ADICIONADA para o Study Assistant */}
+                    <Route path="/study" element={<StudyPage />} />
                     {/* Rotas Admin */}
                     <Route path="/admin/invite-codes" element={<AdminInviteCodesPage />} />
                     <Route path="/admin/users" element={<AdminUsersPage />} />
